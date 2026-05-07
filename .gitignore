@@ -1,0 +1,17 @@
+_build/
+
+.DS_Store
+
+*.opam
+
+.merlin
+*/.merlin
+
+*~
+*.dot
+*.svg
+*.pdf
+*.exe
+*.tar.gz
+
+results/
