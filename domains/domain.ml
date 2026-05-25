@@ -375,36 +375,29 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
     
   type t = man Abstract1.t
 
-  let init : t = Abstract1.top manager env
-
-  (* empty set of environments *)
-  let bottom : t = Abstract1.bottom manager env
-
-  (* assign an integer expression to a variable *)
   let assign poly v e =
     Abstract1.assign_texpr manager poly (Var.of_string v.var_name) (Texpr1.of_expr env (expr_to_texpr e)) None
 
-  (* filter environments to keep only those satisfying the boolean expression *)
-  let guard : t -> bool_expr -> t = failwith "TODO"
+  let init : t = 
+    let a = Abstract1.top manager env in
+    List.fold_left (fun a v -> assign a v (CFG_int_const Z.zero)) a V.support
 
-  (* abstract join *)
+  let bottom : t = Abstract1.bottom manager env
+
+  let rec guard poly = function
+  | 
+
   let join : t -> t -> t = Abstract1.join manager
 
-  (* abstract meet *)
   let meet : t -> t -> t = Abstract1.meet manager
 
-  (* widening *)
   let widen : t -> t -> t = Abstract1.widening manager
 
-  (* narrowing *)
   let narrow : t -> t -> t = meet
 
-  (* whether an abstract element is included in another one *)
   let leq : t -> t -> bool = Abstract1.is_leq manager
 
-  (* whether the abstract element represents the empty set *)
   let is_bottom : t -> bool = Abstract1.is_bottom manager
 
-  (* prints *)
   let pp : Format.formatter -> t -> unit = Abstract1.print
 end
