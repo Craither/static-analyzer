@@ -6,9 +6,6 @@
 
 open Frontend
 open ControlFlowGraph
-open Domains
-
-module SDomain = SignDomain.SignDomain
 
 module NSet = NodeSet
 module NMap = NodeMap
