@@ -236,6 +236,48 @@ module IntervalDomain =
           let int2' = interval_pos_mod (interval_sub (Interval (Value Z.zero,Value Z.zero)) int_neg) max' in
           abstract_union int1' (interval_sub (Interval (Value Z.zero,Value Z.zero)) int2')
 
+    let max_from_div b1 b2 = match b1,b2 with
+      | PlusInf,PlusInf -> PlusInf
+      | PlusInf,Value n -> 
+          if Z.gt n Z.zero then PlusInf
+          else MinusInf 
+      | PlusInf,MinusInf -> MinusInf
+      | MinusInf,PlusInf -> MinusInf
+      | MinusInf,Value n ->
+        if Z.lt n Z.zero then PlusInf
+        else MinusInf
+      | MinusInf,MinusInf -> PlusInf
+      | Value n, _ when Z.equal n Z.zero -> Value Z.zero
+      | Value n, PlusInf ->
+        if Z.gt n Z.zero then PlusInf
+        else MinusInf
+      | Value n, MinusInf ->
+        if Z.lt n Z.zero then PlusInf
+        else MinusInf
+      | Value n1, Value n2 ->
+        Value (Z.div n1 n2)
+    
+    let min_from_div b1 b2 = match b1,b2 with
+      | PlusInf,PlusInf -> PlusInf
+      | PlusInf,Value n ->
+        if Z.lt n Z.zero then MinusInf
+        else PlusInf
+      | PlusInf,MinusInf -> MinusInf
+      | MinusInf,PlusInf -> MinusInf
+      | MinusInf,MinusInf -> PlusInf
+      | MinusInf,Value n -> 
+        if Z.gt n Z.zero then MinusInf
+        else PlusInf
+      | Value n, _ when Z.equal n Z.zero -> Value Z.zero
+      | Value n, PlusInf ->
+        if Z.lt n Z.zero then MinusInf
+        else PlusInf
+      | Value n, MinusInf ->
+        if Z.gt n Z.zero then MinusInf
+        else PlusInf
+      | Value n1, Value n2 ->
+        Value (Z.div n1 n2)
+
     let interval_div int1 int2 = 
       match int1,int2 with
       | Empty,_ | _,Empty -> Empty
@@ -243,7 +285,11 @@ module IntervalDomain =
         if is_negative a' && is_positive b' then
           Empty
         else
-          failwith "TODO"
+          Interval (
+            border_min_list [min_from_div a a'; min_from_div a b'; min_from_div b a'; min_from_div b b'],
+            border_max_list [max_from_div a a'; max_from_div a b'; max_from_div b a'; max_from_div b b']
+          )
+    
     type t = interval
     let top = Interval (MinusInf,PlusInf)
     let bottom = Empty

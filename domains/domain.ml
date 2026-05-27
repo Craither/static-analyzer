@@ -63,13 +63,11 @@ end
 module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
   struct
     module VMap = ControlFlowGraph.VarMap
-    type t = 
-      | Bottom
-      | Env of V.t VMap.t
+    type t = V.t VMap.t
     
-    let init : t = Env (List.fold_left (fun map v -> VMap.add v (V.const Z.zero) map) VMap.empty Vars.support)
+    let init : t = List.fold_left (fun map v -> VMap.add v (V.const Z.zero) map) VMap.empty Vars.support
 
-    let bottom : t = Bottom
+    let bottom : t = VMap.empty
 
     let rec eval_int_expr env = function
     | CFG_int_unary (op,e) -> V.unary (eval_int_expr env e) op
@@ -80,16 +78,19 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
     | CFG_int_rand (n1,n2) -> V.rand n1 n2
 
     let assign env v exp =
-      match env with
-      | Bottom -> Bottom
-      | Env env -> Env (VMap.add v (eval_int_expr env exp) env)
+      if not (VMap.mem v env) then bottom
+      else
+        VMap.add v (eval_int_expr env exp) env
 
-    let guard : t -> bool_expr -> t = failwith "TODO"
+    type evaluated_tree =
+    | ETVar of var
+    | ETConst of Z.t
+    | ETRand of Z.t * Z.t
+    | ETBinop of AbstractSyntax.int_binary_op * (evaluated_tree * V.t) * (evaluated_tree * V.t)
+    | ETUnop of AbstractSyntax.int_unary_op * (evaluated_tree * V.t)
 
-    let pointwise_op f t1 t2 = match t1,t2 with
-    | Bottom,t | t,Bottom -> t
-    | Env e1,Env e2 ->
-      Env (VMap.union (fun _ v1 v2 -> Some (f v1 v2)) e1 e2)
+    let pointwise_op f e1 e2 =
+      VMap.union (fun _ v1 v2 -> Some (f v1 v2)) e1 e2
 
     let join = pointwise_op V.join
 
@@ -99,234 +100,283 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
 
     let narrow : t -> t -> t = pointwise_op V.narrow
 
-    let leq t1 t2 = match t1,t2 with
-    | Bottom,_ -> true
-    | _,Bottom -> false
-    | Env e1,Env e2 ->
+    let rec forward_evaluation env = function
+    | CFG_int_unary (op,e) ->
+      let (t,v) = forward_evaluation env e in
+      (ETUnop (op,(t,v)),V.unary v op)
+    | CFG_int_binary (op,e1,e2) ->
+      let (t1,v1) = forward_evaluation env e1 in
+      let (t2,v2) = forward_evaluation env e2 in
+      (ETBinop (op,(t1,v1),(t2,v2)),V.binary v1 v2 op)
+    | CFG_int_var v ->
+      (ETVar v,if VMap.mem v env then VMap.find v env else V.bottom)
+    | CFG_int_const n ->
+      (ETConst n,V.const n)
+    | CFG_int_rand (n1,n2) ->
+      (ETRand (n1,n2),V.rand n1 n2)
+    
+    let rec backward_evaluation env v_bwd = function
+    | ETVar v -> 
+      if VMap.mem v env then VMap.add v v_bwd env else bottom
+    | ETConst _ -> env
+    | ETRand _ -> env
+    | ETBinop (op,(t1,v1),(t2,v2)) -> 
+      let (v1_bwd,v2_bwd) = V.bwd_binary v1 v2 op v_bwd in
+      meet (backward_evaluation env v1_bwd t1) (backward_evaluation env v2_bwd t2)
+    | ETUnop (op,(t,v)) ->
+      let v_bwd = V.bwd_unary v op v_bwd in
+      backward_evaluation env v_bwd t
+
+    let guard env =
+      let rec aux is_not = function
+      | CFG_bool_unary (_,e) -> aux (not is_not) e
+      | CFG_bool_binary (op,e1,e2) ->
+        let env1 = aux is_not e1 in
+        let env2 = aux is_not e2 in
+        begin match op with
+        | AbstractSyntax.AST_AND -> if is_not then join else meet
+        | AbstractSyntax.AST_OR -> if is_not then meet else join 
+        end env1 env2
+      | CFG_bool_const b ->
+        let b = if is_not then not b else b in
+        if b then env else bottom
+      | CFG_bool_rand -> env
+      | CFG_compare (op,e1,e2) -> 
+        let op = match op with
+        | AbstractSyntax.AST_EQUAL -> if is_not then AbstractSyntax.AST_NOT_EQUAL else op
+        | AbstractSyntax.AST_NOT_EQUAL -> if is_not then AbstractSyntax.AST_EQUAL else op
+        | AbstractSyntax.AST_LESS -> if is_not then AbstractSyntax.AST_GREATER_EQUAL else op
+        | AbstractSyntax.AST_GREATER_EQUAL -> if is_not then AbstractSyntax.AST_LESS else op
+        | AbstractSyntax.AST_LESS_EQUAL -> if is_not then AbstractSyntax.AST_GREATER else op
+        | AbstractSyntax.AST_GREATER -> if is_not then AbstractSyntax.AST_LESS_EQUAL else op
+        in
+        let (t1,v1) = forward_evaluation env e1 in
+        let (t2,v2) = forward_evaluation env e2 in
+        let (v1_bwd,v2_bwd) = V.compare v1 v2 op in
+        let env1 = backward_evaluation env v1_bwd t1 in
+        backward_evaluation env1 v2_bwd t2 
+    in aux false
+
+    let leq e1 e2 =
       VMap.fold (fun k v acc -> acc && VMap.mem k e2 && V.leq v (VMap.find k e2)) e2 true
 
-    let is_bottom : t -> bool = function
-      | Bottom -> true
-      | _ -> false
+    let is_bottom : t -> bool = VMap.is_empty
 
     let print_var fmt var =
       Format.fprintf fmt "{id = %d; name = %s}" var.var_id var.var_name
     
     let pp fmt vmap =
-      match vmap with
-      | Env vmap ->
         VMap.iter (fun v s -> Format.fprintf fmt "%a -> %a@\n" print_var v V.pp s) vmap
-      | Bottom -> Format.fprintf fmt "Bottom"
   end
 
-
-type sign =
-  | Zero
-  | Plus
-  | Minus
-  | Top
-  | Bot
-
-module VMap = ControlFlowGraph.VarMap
-
-let incl m1 m2 =
-  VMap.fold (fun v s acc -> acc && VMap.mem v m2 && VMap.find v m2 = s) m1 true
-
-module OrderedVMap =
-  struct
-    type t = sign VMap.t
-    let compare m1 m2 = 
-      let b1 = incl m1 m2 in
-      let b2 = incl m2 m1 in
-      if b1 && b2 then 0
-      else if b1 then -1
-      else 1
-  end
-
-module MSet = Set.Make(OrderedVMap)
-
-let int_to_sign n =
-  if Z.equal n Z.zero then Zero
-  else if Z.lt Z.zero n then Plus
-  else Minus
-
-let binary_op_sign op s1 s2 =
-  match op with
-  | AbstractSyntax.AST_PLUS -> 
-    begin match s1,s2 with
-    | Plus,Plus | Plus,Zero | Zero,Plus -> Plus
-    | Minus,Minus | Minus,Zero | Zero,Minus -> Minus
-    | Zero,Zero -> Zero
-    | Bot,_ | _,Bot -> Bot
-    | _ -> Top
-    end
-  | AbstractSyntax.AST_MINUS ->
-    begin match s1,s2 with
-    | Plus,Minus | Plus,Zero | Zero,Minus -> Plus
-    | Minus,Plus | Minus,Zero | Zero,Plus -> Minus
-    | Zero,Zero -> Zero
-    | Bot,_ | _,Bot -> Bot
-    | _ -> Top
-    end
-  | AbstractSyntax.AST_MULTIPLY ->
-    begin match s1,s2 with
-    | Plus,Plus | Minus,Minus -> Plus
-    | Plus,Minus | Minus,Plus -> Minus
-    | Bot,_ | _,Bot -> Bot
-    | Zero,_ | _,Zero -> Zero
-    | _ -> Top
-    end
-  | AbstractSyntax.AST_DIVIDE ->
-    begin match s1,s2 with
-    | Plus,Plus | Minus,Minus -> Plus
-    | Plus,Minus | Minus,Plus -> Minus
-    | Bot,_ | _,Bot | _,Zero -> Bot
-    | Zero,_ -> Zero
-    | _ -> Top
-    end
-  | AbstractSyntax.AST_MODULO -> 
-    begin match s1,s2 with
-    | Bot,_ | _,Bot |_,Zero -> Bot
-    | Zero,_ -> Zero
-    | _ -> Top
-    end
-
-let unary_op_sign op s =
-  match op with
-  | AbstractSyntax.AST_UNARY_PLUS -> s
-  | AbstractSyntax.AST_UNARY_MINUS ->
-    begin match s with
-    | Plus -> Minus
-    | Minus -> Plus
-    | _ -> s
-    end
-
-let rec eval_int_expr m =
-    function 
-    | ControlFlowGraph.CFG_int_const n ->
-      int_to_sign n
-    | ControlFlowGraph.CFG_int_rand (a,b) ->
-      let sa = int_to_sign a in
-      let sb = int_to_sign b in
-      if sa = sb then sa
-      else Top
-    | ControlFlowGraph.CFG_int_var v -> 
-        if VMap.mem v m then VMap.find v m
-        else Bot
-    | ControlFlowGraph.CFG_int_binary (op,e1,e2) ->
-      binary_op_sign op (eval_int_expr m e1) (eval_int_expr m e2)
-    | ControlFlowGraph.CFG_int_unary (op,e) ->
-      unary_op_sign op (eval_int_expr m e)
-
-
-type bool_sat =
-  | Value of bool
-  | False_Or_True
-
-let unary_op_bool op b =
-  match op with
-  | AbstractSyntax.AST_NOT ->
-    begin match b with
-    | Value b -> Value (not b)
-    | False_Or_True -> False_Or_True
-    end
-
-let binary_op_bool op b1 b2 =
-  match op with
-  | AbstractSyntax.AST_AND ->
-    begin match b1,b2 with
-    | Value false,_ | _,Value false -> Value false
-    | False_Or_True,_ | _,False_Or_True -> False_Or_True
-    | _ -> Value true
-    end
-  | AbstractSyntax.AST_OR ->
-    begin match b1,b2 with
-    | Value true,_ | _,Value true-> Value true
-    | False_Or_True,_ | _,False_Or_True -> False_Or_True
-    | _ -> Value false
-    end
-
-let bool_sat_to_bool = function
-  | Value b -> b
-  | _ -> true
-
-let comp_sign op s1 s2 =
-  match op with
-  | AbstractSyntax.AST_GREATER_EQUAL ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Plus,_ | _,Minus | Top,_ | _,Top -> Value true
-    | Zero,Zero -> Value true
-    | _ -> Value false
-    end
-  | AbstractSyntax.AST_GREATER ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Plus,_ | _,Minus | Top,_ | _,Top -> Value true
-    | _ -> Value false
-    end
-  | AbstractSyntax.AST_LESS_EQUAL ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Minus,_ | _,Plus | Top,_ | _,Top -> Value true
-    | Zero,Zero -> Value true
-    | _ -> Value false
-    end
-  | AbstractSyntax.AST_LESS ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Minus,_ | _,Plus | Top,_ | _,Top -> Value true
-    | _ -> Value false
-    end
-  | AbstractSyntax.AST_EQUAL ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Minus,Minus | Plus,Plus | Top,_ | _,Top -> Value true
-    | Zero,Zero -> Value true
-    | _ -> Value false
-    end
-  | AbstractSyntax.AST_NOT_EQUAL ->
-    begin match s1,s2 with
-    | Bot,_ | _,Bot -> Value false
-    | Zero,Zero -> Value false
-    | _ -> Value true
-    end
-
-  
-let rec satisfy_bool_expr m = function
-  | ControlFlowGraph.CFG_bool_unary (op,e) -> unary_op_bool op (satisfy_bool_expr m e)
-  | ControlFlowGraph.CFG_bool_binary (op,e1,e2) -> binary_op_bool op (satisfy_bool_expr m e1) (satisfy_bool_expr m e2)
-  | ControlFlowGraph.CFG_bool_const b -> Value b
-  | ControlFlowGraph.CFG_bool_rand -> False_Or_True
-  | ControlFlowGraph.CFG_compare (op,e1,e2) -> comp_sign op (eval_int_expr m e1) (eval_int_expr m e2)
-  
-
-let assign v e m = 
-    let s = eval_int_expr m e in
-    VMap.add v s m
-
-let leq s1 s2 =
-  let inter = MSet.inter s1 s2 in
-  MSet.equal inter s1
-
-let print_sign fmt =
-  function
-  | Plus -> Format.fprintf fmt "Plus"
-  | Minus -> Format.fprintf fmt "Minus"
-  | Zero -> Format.fprintf fmt "0"
-  | Top -> Format.fprintf fmt "Top"
-  | Bot -> Format.fprintf fmt "Bottom"
-
-let print_var fmt var =
-  Format.fprintf fmt "{id = %d; name = %s}" var.ControlFlowGraph.var_id var.ControlFlowGraph.var_name
-
-let print_vmap fmt map =
-  VMap.iter (fun v s -> Format.fprintf fmt "%a -> %a@\n" print_var v print_sign s) map
-
-let pp fmt s =
-  MSet.iter (fun m -> Format.fprintf fmt "{%a}@\n" print_vmap m) s
 
 module SignDomain (V : VARS) : DOMAIN = struct
+  type sign =
+    | Zero
+    | Plus
+    | Minus
+    | Top
+    | Bot
+
+  module VMap = ControlFlowGraph.VarMap
+
+  let incl m1 m2 =
+    VMap.fold (fun v s acc -> acc && VMap.mem v m2 && VMap.find v m2 = s) m1 true
+
+  module OrderedVMap =
+    struct
+      type t = sign VMap.t
+      let compare m1 m2 = 
+        let b1 = incl m1 m2 in
+        let b2 = incl m2 m1 in
+        if b1 && b2 then 0
+        else if b1 then -1
+        else 1
+    end
+
+  module MSet = Set.Make(OrderedVMap)
+
+  let int_to_sign n =
+    if Z.equal n Z.zero then Zero
+    else if Z.lt Z.zero n then Plus
+    else Minus
+
+  let binary_op_sign op s1 s2 =
+    match op with
+    | AbstractSyntax.AST_PLUS -> 
+      begin match s1,s2 with
+      | Plus,Plus | Plus,Zero | Zero,Plus -> Plus
+      | Minus,Minus | Minus,Zero | Zero,Minus -> Minus
+      | Zero,Zero -> Zero
+      | Bot,_ | _,Bot -> Bot
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MINUS ->
+      begin match s1,s2 with
+      | Plus,Minus | Plus,Zero | Zero,Minus -> Plus
+      | Minus,Plus | Minus,Zero | Zero,Plus -> Minus
+      | Zero,Zero -> Zero
+      | Bot,_ | _,Bot -> Bot
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MULTIPLY ->
+      begin match s1,s2 with
+      | Plus,Plus | Minus,Minus -> Plus
+      | Plus,Minus | Minus,Plus -> Minus
+      | Bot,_ | _,Bot -> Bot
+      | Zero,_ | _,Zero -> Zero
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_DIVIDE ->
+      begin match s1,s2 with
+      | Plus,Plus | Minus,Minus -> Plus
+      | Plus,Minus | Minus,Plus -> Minus
+      | Bot,_ | _,Bot | _,Zero -> Bot
+      | Zero,_ -> Zero
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MODULO -> 
+      begin match s1,s2 with
+      | Bot,_ | _,Bot |_,Zero -> Bot
+      | Zero,_ -> Zero
+      | _ -> Top
+      end
+
+  let unary_op_sign op s =
+    match op with
+    | AbstractSyntax.AST_UNARY_PLUS -> s
+    | AbstractSyntax.AST_UNARY_MINUS ->
+      begin match s with
+      | Plus -> Minus
+      | Minus -> Plus
+      | _ -> s
+      end
+
+  let rec eval_int_expr m =
+      function 
+      | ControlFlowGraph.CFG_int_const n ->
+        int_to_sign n
+      | ControlFlowGraph.CFG_int_rand (a,b) ->
+        let sa = int_to_sign a in
+        let sb = int_to_sign b in
+        if sa = sb then sa
+        else Top
+      | ControlFlowGraph.CFG_int_var v -> 
+          if VMap.mem v m then VMap.find v m
+          else Bot
+      | ControlFlowGraph.CFG_int_binary (op,e1,e2) ->
+        binary_op_sign op (eval_int_expr m e1) (eval_int_expr m e2)
+      | ControlFlowGraph.CFG_int_unary (op,e) ->
+        unary_op_sign op (eval_int_expr m e)
+
+
+  type bool_sat =
+    | Value of bool
+    | False_Or_True
+
+  let unary_op_bool op b =
+    match op with
+    | AbstractSyntax.AST_NOT ->
+      begin match b with
+      | Value b -> Value (not b)
+      | False_Or_True -> False_Or_True
+      end
+
+  let binary_op_bool op b1 b2 =
+    match op with
+    | AbstractSyntax.AST_AND ->
+      begin match b1,b2 with
+      | Value false,_ | _,Value false -> Value false
+      | False_Or_True,_ | _,False_Or_True -> False_Or_True
+      | _ -> Value true
+      end
+    | AbstractSyntax.AST_OR ->
+      begin match b1,b2 with
+      | Value true,_ | _,Value true-> Value true
+      | False_Or_True,_ | _,False_Or_True -> False_Or_True
+      | _ -> Value false
+      end
+
+  let bool_sat_to_bool = function
+    | Value b -> b
+    | _ -> true
+
+  let comp_sign op s1 s2 =
+    match op with
+    | AbstractSyntax.AST_GREATER_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Plus,_ | _,Minus | Top,_ | _,Top -> Value true
+      | Zero,Zero -> Value true
+      | _ -> Value false
+      end
+    | AbstractSyntax.AST_GREATER ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Plus,_ | _,Minus | Top,_ | _,Top -> Value true
+      | _ -> Value false
+      end
+    | AbstractSyntax.AST_LESS_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Minus,_ | _,Plus | Top,_ | _,Top -> Value true
+      | Zero,Zero -> Value true
+      | _ -> Value false
+      end
+    | AbstractSyntax.AST_LESS ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Minus,_ | _,Plus | Top,_ | _,Top -> Value true
+      | _ -> Value false
+      end
+    | AbstractSyntax.AST_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Minus,Minus | Plus,Plus | Top,_ | _,Top -> Value true
+      | Zero,Zero -> Value true
+      | _ -> Value false
+      end
+    | AbstractSyntax.AST_NOT_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Value false
+      | Zero,Zero -> Value false
+      | _ -> Value true
+      end
+
+      
+    let rec satisfy_bool_expr m = function
+      | ControlFlowGraph.CFG_bool_unary (op,e) -> unary_op_bool op (satisfy_bool_expr m e)
+      | ControlFlowGraph.CFG_bool_binary (op,e1,e2) -> binary_op_bool op (satisfy_bool_expr m e1) (satisfy_bool_expr m e2)
+      | ControlFlowGraph.CFG_bool_const b -> Value b
+      | ControlFlowGraph.CFG_bool_rand -> False_Or_True
+      | ControlFlowGraph.CFG_compare (op,e1,e2) -> comp_sign op (eval_int_expr m e1) (eval_int_expr m e2)
+      
+
+    let assign v e m = 
+        let s = eval_int_expr m e in
+        VMap.add v s m
+
+    let leq s1 s2 =
+      let inter = MSet.inter s1 s2 in
+      MSet.equal inter s1
+
+    let print_sign fmt =
+      function
+      | Plus -> Format.fprintf fmt "Plus"
+      | Minus -> Format.fprintf fmt "Minus"
+      | Zero -> Format.fprintf fmt "0"
+      | Top -> Format.fprintf fmt "Top"
+      | Bot -> Format.fprintf fmt "Bottom"
+
+    let print_var fmt var =
+      Format.fprintf fmt "{id = %d; name = %s}" var.ControlFlowGraph.var_id var.ControlFlowGraph.var_name
+
+    let print_vmap fmt map =
+      VMap.iter (fun v s -> Format.fprintf fmt "%a -> %a@\n" print_var v print_sign s) map
+
+    let pp fmt s =
+      MSet.iter (fun m -> Format.fprintf fmt "{%a}@\n" print_vmap m) s
+
     type t = MSet.t
     let init = MSet.singleton (List.fold_left (fun map v -> VMap.add v Zero map) VMap.empty V.support)
     let bottom = MSet.empty
@@ -336,9 +386,7 @@ module SignDomain (V : VARS) : DOMAIN = struct
     let meet = MSet.inter
     let widen = join
     let narrow = meet
-    let leq = leq
     let is_bottom = MSet.is_empty
-    let pp = pp
   end
 
 
