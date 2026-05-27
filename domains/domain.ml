@@ -158,9 +158,9 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
     in aux false
 
     let leq e1 e2 =
-      VMap.fold (fun k v acc -> acc && VMap.mem k e2 && V.leq v (VMap.find k e2)) e2 true
+      VMap.fold (fun k v acc -> acc && V.leq v (VMap.find k e2)) e1 true
 
-    let is_bottom : t -> bool = VMap.is_empty
+    let is_bottom = VMap.is_empty
 
     let print_var fmt var =
       Format.fprintf fmt "{id = %d; name = %s}" var.var_id var.var_name
@@ -181,7 +181,7 @@ module SignDomain (V : VARS) : DOMAIN = struct
   module VMap = ControlFlowGraph.VarMap
 
   let incl m1 m2 =
-    VMap.fold (fun v s acc -> acc && VMap.mem v m2 && VMap.find v m2 = s) m1 true
+    VMap.fold (fun v s acc -> acc && VMap.find v m2 = s) m1 true
 
   module OrderedVMap =
     struct
@@ -252,23 +252,21 @@ module SignDomain (V : VARS) : DOMAIN = struct
       | _ -> s
       end
 
-  let rec eval_int_expr m =
-      function 
-      | ControlFlowGraph.CFG_int_const n ->
-        int_to_sign n
-      | ControlFlowGraph.CFG_int_rand (a,b) ->
-        let sa = int_to_sign a in
-        let sb = int_to_sign b in
-        if sa = sb then sa
-        else Top
-      | ControlFlowGraph.CFG_int_var v -> 
-          if VMap.mem v m then VMap.find v m
-          else Bot
-      | ControlFlowGraph.CFG_int_binary (op,e1,e2) ->
-        binary_op_sign op (eval_int_expr m e1) (eval_int_expr m e2)
-      | ControlFlowGraph.CFG_int_unary (op,e) ->
-        unary_op_sign op (eval_int_expr m e)
-
+  let rec eval_int_expr m = function 
+    | ControlFlowGraph.CFG_int_const n ->
+      int_to_sign n
+    | ControlFlowGraph.CFG_int_rand (a,b) ->
+      let sa = int_to_sign a in
+      let sb = int_to_sign b in
+      if sa = sb then sa
+      else Top
+    | ControlFlowGraph.CFG_int_var v -> 
+        if VMap.mem v m then VMap.find v m
+        else Bot
+    | ControlFlowGraph.CFG_int_binary (op,e1,e2) ->
+      binary_op_sign op (eval_int_expr m e1) (eval_int_expr m e2)
+    | ControlFlowGraph.CFG_int_unary (op,e) ->
+      unary_op_sign op (eval_int_expr m e)
 
   type bool_sat =
     | Value of bool
@@ -299,7 +297,7 @@ module SignDomain (V : VARS) : DOMAIN = struct
 
   let bool_sat_to_bool = function
     | Value b -> b
-    | _ -> true
+    | False_Or_True -> true
 
   let comp_sign op s1 s2 =
     match op with

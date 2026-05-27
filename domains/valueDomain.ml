@@ -413,7 +413,11 @@ module CongruenceDomain =
 
     let widen = join
 
-    let narrow = meet
+    let narrow c1 c2 = match c1,c2 with
+    | Bottom,_ | _,Bottom -> bottom
+    | Congr (a1,b1), _ -> 
+      if Z.equal a1 Z.zero then c2
+      else c1 
 
     let const n = Congr (Z.zero,n)
 
