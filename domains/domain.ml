@@ -384,14 +384,81 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
   let assign poly v e =
     Abstract1.assign_texpr manager poly (Var.of_string v.var_name) (Texpr1.of_expr env (expr_to_texpr e)) None
 
-  (* filter environments to keep only those satisfying the boolean expression *)
-  let guard : t -> bool_expr -> t = failwith "TODO"
 
   (* abstract join *)
   let join : t -> t -> t = Abstract1.join manager
 
   (* abstract meet *)
   let meet : t -> t -> t = Abstract1.meet manager
+
+    (* filter environments to keep only those satisfying the boolean expression *)
+  let rec guard poly bexpr =
+    let rec aux is_not = function
+    | CFG_bool_unary (_,e) -> aux (not is_not) e
+    | CFG_bool_binary (op,e1,e2) ->
+      let poly1 = aux is_not e1 in
+      let poly2 = aux is_not e2 in
+      begin match op with
+      | AbstractSyntax.AST_AND -> if is_not then join else meet
+      | AbstractSyntax.AST_OR -> if is_not then meet else join 
+      end poly1 poly2
+    | CFG_bool_const b ->
+      let b = if is_not then not b else b in
+      if b then poly else bottom
+    | CFG_bool_rand -> poly
+    | CFG_compare (op,e1,e2) ->
+      let op = match op with
+      | AbstractSyntax.AST_EQUAL -> if is_not then AbstractSyntax.AST_NOT_EQUAL else op
+      | AbstractSyntax.AST_NOT_EQUAL -> if is_not then AbstractSyntax.AST_EQUAL else op
+      | AbstractSyntax.AST_LESS -> if is_not then AbstractSyntax.AST_GREATER_EQUAL else op
+      | AbstractSyntax.AST_GREATER_EQUAL -> if is_not then AbstractSyntax.AST_LESS else op
+      | AbstractSyntax.AST_LESS_EQUAL -> if is_not then AbstractSyntax.AST_GREATER else op
+      | AbstractSyntax.AST_GREATER -> if is_not then AbstractSyntax.AST_LESS_EQUAL else op
+      in
+      let t1 = expr_to_texpr e1 in
+      let t2 = expr_to_texpr e2 in
+      let t1_2 = Texpr1.Binop (Texpr1.Sub,t1,t2,Texpr1.Int,Texpr1.Near) in
+      let texpr1_2 = Texpr1.of_expr env t1_2 in
+      let t2_1 = Texpr1.Binop (Texpr1.Sub,t2,t1,Texpr1.Int,Texpr1.Near) in
+      let texpr2_1 = Texpr1.of_expr env t2_1 in
+      begin match op with
+      | AbstractSyntax.AST_EQUAL -> 
+        let c = Tcons1.make texpr1_2 Lincons0.EQ in
+        let ar = Tcons1.array_make env 1 in
+        Tcons1.array_set ar 0 c;
+        Abstract1.meet_tcons_array manager poly ar
+      | AbstractSyntax.AST_NOT_EQUAL ->
+        let c1 = Tcons1.make texpr1_2 Lincons0.SUP in
+        let ar1 = Tcons1.array_make env 1 in
+        Tcons1.array_set ar1 0 c1;
+        let poly1 = Abstract1.meet_tcons_array manager poly ar1 in
+        let c2 = Tcons1.make texpr2_1 Lincons0.SUP in
+        let ar2 = Tcons1.array_make env 1 in
+        Tcons1.array_set ar2 0 c2;
+        let poly2 = Abstract1.meet_tcons_array manager poly ar2 in
+        join poly1 poly2
+      | AbstractSyntax.AST_LESS ->
+        let c = Tcons1.make texpr2_1 Lincons0.SUP in
+        let ar = Tcons1.array_make env 1 in
+        Tcons1.array_set ar 0 c;
+        Abstract1.meet_tcons_array manager poly ar
+      | AbstractSyntax.AST_LESS_EQUAL ->
+        let c = Tcons1.make texpr2_1 Lincons0.SUPEQ in
+        let ar = Tcons1.array_make env 1 in
+        Tcons1.array_set ar 0 c;
+        Abstract1.meet_tcons_array manager poly ar
+      | AbstractSyntax.AST_GREATER ->
+        let c = Tcons1.make texpr1_2 Lincons0.SUP in
+        let ar = Tcons1.array_make env 1 in
+        Tcons1.array_set ar 0 c;
+        Abstract1.meet_tcons_array manager poly ar
+      | AbstractSyntax.AST_GREATER_EQUAL ->
+        let c = Tcons1.make texpr1_2 Lincons0.SUPEQ in
+        let ar = Tcons1.array_make env 1 in
+        Tcons1.array_set ar 0 c;
+        Abstract1.meet_tcons_array manager poly ar
+      end
+    in aux false bexpr
 
   (* widening *)
   let widen : t -> t -> t = Abstract1.widening manager
