@@ -373,3 +373,141 @@ module IntervalDomain =
           | Value n -> Z.to_string n
         in Format.fprintf fmt "[%s ; %s]" s1 s2
   end: VALUE_DOMAIN)
+
+module CongruenceDomain = 
+  (struct
+    let rec pgcd a b =
+      if Z.equal b Z.zero then a
+      else pgcd b (Z.(mod) a b)
+
+    let ppcm a b =
+      if Z.equal a Z.zero || Z.equal b Z.zero then Z.zero
+      else Z.div (pgcd a b) (Z.mul a b)
+
+    let rec extended_pgcd a b =
+      if Z.equal b Z.zero then (a,Z.one,Z.zero)
+      else 
+        let (p,u,v) = extended_pgcd b (Z.(mod) a b) in
+        (p,v,Z.sub u (Z.mul (Z.div a b) v))
+
+    type t =
+    | Bottom
+    | Congr of Z.t * Z.t (*Congr (a,b) represents aZ + b*)
+
+    let top = Congr (Z.one,Z.zero)
+
+    let bottom = Bottom
+
+    let join c1 c2 = match c1,c2 with
+    | Bottom,c | c,Bottom -> c
+    | Congr (a1,b1), Congr (a2,b2) -> 
+      Congr(pgcd (pgcd a1 a2) (Z.abs (Z.sub b1 b2)),b1)
+
+    let meet c1 c2 = match c1,c2 with
+    | Bottom,_ | _,Bottom -> bottom
+    | Congr (a1,b1), Congr (a2,b2) ->
+      let (p,u,v) = extended_pgcd a1 a2 in
+      if Z.equal (Z.(mod) b1 p) (Z.(mod) b2 p) then
+        Congr (ppcm a1 a2,Z.add b1 (Z.mul a1 (Z.mul u (Z.div (Z.sub b2 b1) p))))
+      else top
+
+    let widen = join
+
+    let narrow = meet
+
+    let const n = Congr (Z.zero,n)
+
+    let rand n1 n2 =
+      if Z.equal n1 n2 then const n1 else top
+
+    let unary c = function
+      | AbstractSyntax.AST_UNARY_PLUS -> c
+      | AbstractSyntax.AST_UNARY_MINUS ->
+        begin match c with
+        | Bottom -> Bottom
+        | Congr (a,b) ->
+          Congr (a,Z.sub a b)
+        end
+
+    let binary c1 c2 op =
+      match (c1,c2) with
+      | Bottom,_ | _,Bottom -> bottom
+      | Congr (a1,b1), Congr(a2,b2) ->
+        begin match op with
+        | AbstractSyntax.AST_PLUS -> 
+          Congr (pgcd a1 a2, Z.add b1 b2)
+        | AbstractSyntax.AST_MINUS ->
+          Congr (pgcd a1 a2, Z.add b1 (Z.sub a2 b2))
+        | AbstractSyntax.AST_MULTIPLY ->
+          Congr (pgcd (pgcd (Z.mul a1 a2) (Z.mul a1 b2)) (Z.mul b1 a2), Z.mul b1 b2)
+        | AbstractSyntax.AST_DIVIDE ->
+          if Z.equal a2 Z.zero && Z.equal b2 Z.zero then bottom
+          else if Z.equal a2 Z.zero && Z.divisible a1 b2 && Z.divisible b1 b2 then Congr (Z.div a1 b2,Z.div b1 b2)
+          else top
+        | AbstractSyntax.AST_MODULO -> failwith "TODO"
+        end
+
+    let compare x y op = 
+      match x,y with
+      | Bottom,_ | _,Bottom -> bottom,bottom
+      | Congr (a1,b1), Congr (a2,b2) ->
+        begin match op with
+        | AbstractSyntax.AST_EQUAL -> 
+          let x' = meet x y in x',x'
+        | _ ->
+          let (f1,f2) = 
+            begin match op with
+            | AbstractSyntax.AST_GREATER_EQUAL -> Z.geq, Z.leq
+            | AbstractSyntax.AST_GREATER -> Z.gt, Z.lt
+            | AbstractSyntax.AST_LESS_EQUAL -> Z.leq, Z.geq
+            | AbstractSyntax.AST_LESS -> Z.lt, Z.gt
+            | AbstractSyntax.AST_NOT_EQUAL -> 
+              let not_equal a b = not (Z.equal a b) in not_equal, not_equal
+            | _ -> failwith "Cas impossible"
+            end
+          in
+          let x' =
+            if Z.equal a2 Z.zero then
+              if Z.equal a1 Z.zero then
+                if f1 b1 b2 then
+                  x
+                else Bottom
+              else Bottom
+            else x 
+          in let y' =
+            if Z.equal a1 Z.zero then
+              if Z.equal a2 Z.zero then
+                if f2 b1 b2 then
+                  y
+                else Bottom
+              else Bottom
+            else y in
+            x',y'
+        end
+
+    let bwd_unary x op r =
+      match op with
+      | AbstractSyntax.AST_UNARY_PLUS -> meet x r
+      | AbstractSyntax.AST_UNARY_MINUS -> meet x (unary r AbstractSyntax.AST_UNARY_MINUS)
+
+    let bwd_binary x y op r =
+      match op with
+      | AST_PLUS -> meet (binary r y AST_MINUS) x, meet (binary r x AST_MINUS) y
+      | AST_MINUS -> meet (binary r y AST_PLUS) x, meet (binary x r AST_MINUS) y
+      | AST_MULTIPLY -> meet (binary r y AST_DIVIDE) x, meet (binary r x AST_DIVIDE) y
+      | _ -> x,y
+
+    let leq c1 c2 = match c1,c2 with
+    | Bottom,_ -> true
+    | _,Bottom -> false
+    | Congr (a1,b1), Congr (a2,b2) -> Z.divisible a1 a2 && Z.equal (Z.(mod) (Z.sub b1 b2) a2) Z.zero
+
+    let is_bottom = function
+    | Bottom -> true
+    | _ -> false
+
+    let pp fmt = function
+    | Bottom -> Format.fprintf fmt "Bottom"
+    | Congr (a,b) ->
+      Format.fprintf fmt "%sZ + %s" (Z.to_string a) (Z.to_string b)
+  end: VALUE_DOMAIN)
