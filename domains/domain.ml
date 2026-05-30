@@ -8,6 +8,8 @@ open Frontend
 open ControlFlowGraph
 open Apron
 
+exception EmptyAbstract
+
 (* Signature for the variables *)
 
 module type VARS = sig
@@ -78,9 +80,7 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
     | CFG_int_rand (n1,n2) -> V.rand n1 n2
 
     let assign env v exp =
-      if not (VMap.mem v env) then bottom
-      else
-        VMap.add v (eval_int_expr env exp) env
+      VMap.add v (eval_int_expr env exp) env
 
     type evaluated_tree =
     | ETVar of var
@@ -100,62 +100,84 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
 
     let narrow : t -> t -> t = pointwise_op V.narrow
 
-    let rec forward_evaluation env = function
-    | CFG_int_unary (op,e) ->
-      let (t,v) = forward_evaluation env e in
-      (ETUnop (op,(t,v)),V.unary v op)
-    | CFG_int_binary (op,e1,e2) ->
-      let (t1,v1) = forward_evaluation env e1 in
-      let (t2,v2) = forward_evaluation env e2 in
-      (ETBinop (op,(t1,v1),(t2,v2)),V.binary v1 v2 op)
-    | CFG_int_var v ->
-      (ETVar v,if VMap.mem v env then VMap.find v env else V.bottom)
-    | CFG_int_const n ->
-      (ETConst n,V.const n)
-    | CFG_int_rand (n1,n2) ->
-      (ETRand (n1,n2),V.rand n1 n2)
-    
-    let rec backward_evaluation env v_bwd = function
-    | ETVar v -> 
-      if VMap.mem v env then VMap.add v v_bwd env else bottom
-    | ETConst _ -> env
-    | ETRand _ -> env
-    | ETBinop (op,(t1,v1),(t2,v2)) -> 
-      let (v1_bwd,v2_bwd) = V.bwd_binary v1 v2 op v_bwd in
-      meet (backward_evaluation env v1_bwd t1) (backward_evaluation env v2_bwd t2)
-    | ETUnop (op,(t,v)) ->
-      let v_bwd = V.bwd_unary v op v_bwd in
-      backward_evaluation env v_bwd t
-
-    let guard env =
-      let rec aux is_not = function
-      | CFG_bool_unary (_,e) -> aux (not is_not) e
-      | CFG_bool_binary (op,e1,e2) ->
-        let env1 = aux is_not e1 in
-        let env2 = aux is_not e2 in
-        begin match op with
-        | AbstractSyntax.AST_AND -> if is_not then join else meet
-        | AbstractSyntax.AST_OR -> if is_not then meet else join 
-        end env1 env2
-      | CFG_bool_const b ->
-        let b = if is_not then not b else b in
-        if b then env else bottom
-      | CFG_bool_rand -> env
-      | CFG_compare (op,e1,e2) -> 
-        let op = match op with
-        | AbstractSyntax.AST_EQUAL -> if is_not then AbstractSyntax.AST_NOT_EQUAL else op
-        | AbstractSyntax.AST_NOT_EQUAL -> if is_not then AbstractSyntax.AST_EQUAL else op
-        | AbstractSyntax.AST_LESS -> if is_not then AbstractSyntax.AST_GREATER_EQUAL else op
-        | AbstractSyntax.AST_GREATER_EQUAL -> if is_not then AbstractSyntax.AST_LESS else op
-        | AbstractSyntax.AST_LESS_EQUAL -> if is_not then AbstractSyntax.AST_GREATER else op
-        | AbstractSyntax.AST_GREATER -> if is_not then AbstractSyntax.AST_LESS_EQUAL else op
-        in
-        let (t1,v1) = forward_evaluation env e1 in
-        let (t2,v2) = forward_evaluation env e2 in
-        let (v1_bwd,v2_bwd) = V.compare v1 v2 op in
-        let env1 = backward_evaluation env v1_bwd t1 in
-        backward_evaluation env1 v2_bwd t2 
-    in aux false
+    let guard t bool_expr = 
+      let opposite_op_cmp op =
+        match op with 
+        | AbstractSyntax.AST_EQUAL -> AbstractSyntax.AST_NOT_EQUAL     
+        | AST_NOT_EQUAL -> AST_EQUAL
+        | AST_LESS -> AST_GREATER_EQUAL
+        | AST_LESS_EQUAL -> AST_GREATER
+        | AST_GREATER -> AST_LESS_EQUAL
+        | AST_GREATER_EQUAL -> AST_LESS
+      in
+      let rec guard t bool_expr is_not = 
+        match bool_expr with 
+        | CFG_bool_unary(bool_unary_op, bool_expr) -> 
+          (match bool_unary_op with 
+          | AST_NOT -> guard t bool_expr (not is_not))
+          
+        | CFG_bool_binary(bool_binary_op, bool_expr1, bool_expr2) -> 
+          (match (bool_binary_op, is_not) with
+          | (AST_AND, false) | (AST_OR, true) ->
+            meet (guard t bool_expr1 is_not) (guard t bool_expr2 is_not)
+            
+          | (AST_AND, true) | (AST_OR, false) -> 
+            join (guard t bool_expr1 is_not) (guard t bool_expr2 is_not))
+        
+        | CFG_compare(compare_op, int_expr1, int_expr2) ->
+          let rec refine_values env abs_v int_expr = 
+            match int_expr with 
+            | CFG_int_unary(int_unary_op, int_expr) ->
+              let value = eval_int_expr env int_expr in
+              let value = V.bwd_unary value int_unary_op abs_v in
+              refine_values env value int_expr
+            
+            | CFG_int_binary(int_binary_op, int_expr1, int_expr2) ->
+              let value1 = (eval_int_expr env int_expr1) in
+              let value2 = (eval_int_expr env int_expr2) in
+              let (value1, value2) = V.bwd_binary value1 value2 int_binary_op abs_v in
+              meet (refine_values env value1 int_expr1) (refine_values env value2 int_expr2)
+            
+            | CFG_int_var(var) -> 
+              begin
+              if V.is_bottom abs_v then
+                raise EmptyAbstract 
+              else
+                VMap.add var abs_v env
+              end
+              
+            | CFG_int_const(_) -> 
+              bottom
+              
+            | CFG_int_rand(_, _) -> 
+              bottom
+          in
+          let compare_op = 
+            if is_not then 
+              opposite_op_cmp compare_op 
+            else 
+              compare_op
+          in
+          let value1 = eval_int_expr t int_expr1 in
+          let value2 = (eval_int_expr t int_expr2) in
+          let (value1, value2) = V.compare value1 value2 compare_op in
+          (try 
+            meet (refine_values t value1 int_expr1) (refine_values t value2 int_expr2)
+          
+          with
+          | EmptyAbstract -> bottom)
+          
+        | CFG_bool_const(b) -> 
+          if (b <> is_not) then 
+            t
+          
+          else
+            bottom
+            
+        | CFG_bool_rand ->
+          t
+      in
+      guard t bool_expr false
 
     let leq e1 e2 =
       VMap.fold (fun k v acc -> acc && V.leq v (VMap.find k e2)) e1 true

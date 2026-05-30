@@ -100,7 +100,7 @@ module SignDomain =
     let const n =
       if Z.equal n Z.zero then Zero
       else if Z.gt n Z.zero then Plus
-      else Bot
+      else Minus
 
     let rand n1 n2 =
       if Z.equal n1 Z.zero && Z.equal n2 Z.zero then Zero
@@ -161,6 +161,8 @@ module SignDomain =
       if s1 = bottom then s2
       else if s2 = bottom then s1
       else if s1 = s2 then s1
+      else if s1 == Zero then s2
+      else if s2 == Zero then s1
       else top
     
     let widen = join
@@ -395,12 +397,14 @@ module IntervalDomain =
       | _, Interval (a',b') ->
         if is_negative a' && is_positive b' then
           Empty
+          
         else
           let max' = border_max (border_abs a') (border_abs b') in
           let int_pos,int_neg = get_pos_neg int1 in
           let int1' = interval_pos_mod int_pos max' in
           let int2' = interval_pos_mod (interval_sub (Interval (Value Z.zero,Value Z.zero)) int_neg) max' in
           abstract_union int1' (interval_sub (Interval (Value Z.zero,Value Z.zero)) int2')
+
 
     let max_from_div b1 b2 = match b1,b2 with
       | PlusInf,PlusInf -> PlusInf
