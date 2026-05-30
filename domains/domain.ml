@@ -27,7 +27,7 @@ module type DOMAIN = sig
        to integers
      *)
   type t
-
+  
   (* initial environment, with all variables initialized to 0 *)
   val init : t
 
@@ -70,7 +70,6 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
     let init : t = List.fold_left (fun map v -> VMap.add v (V.const Z.zero) map) VMap.empty Vars.support
 
     let bottom : t = VMap.empty
-
     let rec eval_int_expr env = function
     | CFG_int_unary (op,e) -> V.unary (eval_int_expr env e) op
     | CFG_int_binary (op,e1,e2) -> V.binary (eval_int_expr env e1) (eval_int_expr env e2) op
@@ -188,7 +187,7 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
   let env = Environment.make (Array.of_list (List.map (fun v -> Var.of_string v.var_name) V.support)) [||]
   type man = Polka.loose Polka.t
   let manager = Polka.manager_alloc_loose ()
-
+  
   let rec expr_to_texpr = function
   | CFG_int_unary (unop,e) ->
     begin match unop with
@@ -241,8 +240,7 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
       | AbstractSyntax.AST_OR -> if is_not then meet else join 
       end poly1 poly2
     | CFG_bool_const b ->
-      let b = if is_not then not b else b in
-      if b then poly else bottom
+      if b <> is_not then poly else bottom
     | CFG_bool_rand -> poly
     | CFG_compare (op,e1,e2) ->
       let op = match op with
@@ -280,6 +278,7 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
         let ar = Tcons1.array_make env 1 in
         Tcons1.array_set ar 0 c;
         Abstract1.meet_tcons_array manager poly ar
+        
       | AbstractSyntax.AST_LESS_EQUAL ->
         let c = Tcons1.make texpr2_1 Lincons0.SUPEQ in
         let ar = Tcons1.array_make env 1 in

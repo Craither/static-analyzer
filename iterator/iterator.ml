@@ -14,8 +14,6 @@ end
 
 module Domain = Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars)
 
-(*module Domain = Domain.PolyhedraDomain(MyVars)*)
-
 module NSet = NodeSet
 module NMap = NodeMap
 
@@ -82,7 +80,7 @@ let iterate cfg =
       )
       program_env node.node_in
       in
-      Printf.printf "%d\n" node.node_id;
+      (*Printf.printf "%d\n" node.node_id;
       let env = match NMap.find_opt node (fst program_env) with
         | None -> Domain.bottom
         | Some env_src -> env_src
@@ -98,7 +96,7 @@ let iterate cfg =
       Format.fprintf (Format.std_formatter) "\n";
       Format.pp_print_flush (Format.std_formatter) ();
       
-      Printf.printf "%b\n" changed;
+      Printf.printf "%b\n" changed;*)
       let to_update =
         if changed || not (NMap.mem node (fst program_env)) then 
           List.fold_left (

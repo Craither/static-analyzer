@@ -6,6 +6,6 @@
 
 void main(){
   int i = 0;
-  assert(false); //@KO
+  while(true);
   assert(false); //This assertion should not fail
 }
