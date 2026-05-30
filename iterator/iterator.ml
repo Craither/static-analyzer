@@ -12,7 +12,7 @@ module MyVars : Domain.VARS = struct
   let support = []
 end
 
-module Domain = Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars)
+module Domain = Domain.Value_to_Domain(ValueDomain.IntervalDomain)(MyVars)
 
 (*module Domain = Domain.PolyhedraDomain(MyVars)*)
 
@@ -73,12 +73,12 @@ let iterate cfg =
         in
         let new_env_dst = update_env env_src arc.arc_inst in
         let new_env_dst = 
-          (*if node.widen then 
+          if node.widen then 
            Domain.widen env_dst new_env_dst
-          else*)
+          else
            Domain.join env_dst new_env_dst
         in
-        (NMap.add arc.arc_dst new_env_dst program_env, (changed || (new_env_dst <> env_dst)))
+        (NMap.add arc.arc_dst new_env_dst program_env, (changed || env_dst <> new_env_dst))
       )
       program_env node.node_in
       in

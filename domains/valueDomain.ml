@@ -397,7 +397,6 @@ module IntervalDomain =
       | _, Interval (a',b') ->
         if is_negative a' && is_positive b' then
           Empty
-          
         else
           let max' = border_max (border_abs a') (border_abs b') in
           let int_pos,int_neg = get_pos_neg int1 in
@@ -452,8 +451,7 @@ module IntervalDomain =
       match int1,int2 with
       | Empty,_ | _,Empty -> Empty
       | Interval (a,b), Interval (a',b') -> 
-        if is_negative a' && is_positive b' then
-          Empty
+        if is_negative a' && is_positive b' then Interval (MinusInf,PlusInf)
         else
           Interval (
             border_min_list [min_from_div a a'; min_from_div a b'; min_from_div b a'; min_from_div b b'],
@@ -514,7 +512,15 @@ module IntervalDomain =
       match op with
       | AbstractSyntax.AST_PLUS -> interval_intersect x (interval_sub r y), interval_intersect y (interval_sub r x)
       | AbstractSyntax.AST_MINUS -> interval_intersect x (interval_add r y), interval_intersect y (interval_sub x r)
-      | AbstractSyntax.AST_MULTIPLY -> interval_intersect x (interval_div r y), interval_intersect y (interval_div r x)
+      | AbstractSyntax.AST_MULTIPLY -> 
+        begin match y with
+        | Empty -> Empty
+        | Interval (a',b') -> if is_negative a' && is_positive b' then x
+        else interval_intersect x (interval_div r y) end,
+        begin match x with
+        | Empty -> Empty
+        | Interval (a',b') -> if is_negative a' && is_positive b' then y
+        else interval_intersect y (interval_div r x) end
       | AbstractSyntax.AST_DIVIDE -> x,y
       | AbstractSyntax.AST_MODULO -> x,y
     let join = abstract_union
@@ -576,10 +582,15 @@ module CongruenceDomain =
     let meet c1 c2 = match c1,c2 with
     | Bottom,_ | _,Bottom -> bottom
     | Congr (a1,b1), Congr (a2,b2) ->
-      let (p,u,v) = extended_pgcd a1 a2 in
-      if Z.equal (Z.(mod) b1 p) (Z.(mod) b2 p) then
-        Congr (ppcm a1 a2,Z.add b1 (Z.mul a1 (Z.mul u (Z.div (Z.sub b2 b1) p))))
-      else top
+      if Z.equal a1 Z.zero && Z.equal a2 Z.zero then (
+        if Z.equal b1 b2 then
+          c1
+        else bottom
+      ) else
+        let (p,u,v) = extended_pgcd a1 a2 in
+        if Z.equal (Z.(mod) b1 p) (Z.(mod) b2 p) then
+          Congr (ppcm a1 a2,Z.add b1 (Z.mul a1 (Z.mul u (Z.div (Z.sub b2 b1) p))))
+        else top
 
     let widen = join
 
@@ -618,7 +629,7 @@ module CongruenceDomain =
           if Z.equal a2 Z.zero && Z.equal b2 Z.zero then bottom
           else if Z.equal a2 Z.zero && Z.divisible a1 b2 && Z.divisible b1 b2 then Congr (Z.div a1 b2,Z.div b1 b2)
           else top
-        | AbstractSyntax.AST_MODULO -> failwith "TODO"
+        | AbstractSyntax.AST_MODULO -> top
         end
 
     let compare x y op = 
@@ -668,13 +679,21 @@ module CongruenceDomain =
       match op with
       | AST_PLUS -> meet (binary r y AST_MINUS) x, meet (binary r x AST_MINUS) y
       | AST_MINUS -> meet (binary r y AST_PLUS) x, meet (binary x r AST_MINUS) y
-      | AST_MULTIPLY -> meet (binary r y AST_DIVIDE) x, meet (binary r x AST_DIVIDE) y
+      | AST_MULTIPLY -> 
+        begin match y with
+        | Bottom -> Bottom
+        | Congr (a,b) -> if Z.equal b Z.zero then x else meet (binary r y AST_DIVIDE) x end,
+        begin match x with
+        | Bottom -> Bottom
+        | Congr (a,b) -> if Z.equal b Z.zero then y else meet (binary r x AST_DIVIDE) y end
       | _ -> x,y
 
     let leq c1 c2 = match c1,c2 with
     | Bottom,_ -> true
     | _,Bottom -> false
-    | Congr (a1,b1), Congr (a2,b2) -> Z.divisible a1 a2 && Z.equal (Z.(mod) (Z.sub b1 b2) a2) Z.zero
+    | Congr (a1,b1), Congr (a2,b2) -> 
+      if Z.equal a2 Z.zero then Z.equal a1 Z.zero && Z.equal b1 b2
+      else Z.divisible a1 a2 && Z.equal (Z.(mod) (Z.sub b1 b2) a2) Z.zero
 
     let is_bottom = function
     | Bottom -> true
