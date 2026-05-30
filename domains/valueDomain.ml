@@ -84,6 +84,172 @@ module type VALUE_DOMAIN = sig
   val pp : Format.formatter -> t -> unit
 end
   
+module SignDomain =
+  (struct
+    type t =
+    | Zero
+    | Plus
+    | Minus
+    | Top
+    | Bot
+
+    let top = Top
+
+    let bottom = Bot
+
+    let const n =
+      if Z.equal n Z.zero then Zero
+      else if Z.gt n Z.zero then Plus
+      else Bot
+
+    let rand n1 n2 =
+      if Z.equal n1 Z.zero && Z.equal n2 Z.zero then Zero
+      else if Z.gt n1 Z.zero && Z.gt n2 Z.zero then Plus
+      else if Z.lt n1 Z.zero && Z.lt n2 Z.zero then Minus
+      else Top
+
+    let unary s = function
+    | AbstractSyntax.AST_UNARY_PLUS -> s
+    | AbstractSyntax.AST_UNARY_MINUS ->
+      begin match s with
+      | Plus -> Minus
+      | Minus -> Plus
+      | _ -> s
+      end
+
+    let binary s1 s2 = function
+    | AbstractSyntax.AST_PLUS -> 
+      begin match s1,s2 with
+      | Plus,Plus | Plus,Zero | Zero,Plus -> Plus
+      | Minus,Minus | Minus,Zero | Zero,Minus -> Minus
+      | Zero,Zero -> Zero
+      | Bot,_ | _,Bot -> Bot
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MINUS ->
+      begin match s1,s2 with
+      | Plus,Minus | Plus,Zero | Zero,Minus -> Plus
+      | Minus,Plus | Minus,Zero | Zero,Plus -> Minus
+      | Zero,Zero -> Zero
+      | Bot,_ | _,Bot -> Bot
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MULTIPLY ->
+      begin match s1,s2 with
+      | Plus,Plus | Minus,Minus -> Plus
+      | Plus,Minus | Minus,Plus -> Minus
+      | Bot,_ | _,Bot -> Bot
+      | Zero,_ | _,Zero -> Zero
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_DIVIDE ->
+      begin match s1,s2 with
+      | Plus,Plus | Minus,Minus -> Plus
+      | Plus,Minus | Minus,Plus -> Minus
+      | Bot,_ | _,Bot | _,Zero -> Bot
+      | Zero,_ -> Zero
+      | _ -> Top
+      end
+    | AbstractSyntax.AST_MODULO -> 
+      begin match s1,s2 with
+      | Bot,_ | _,Bot |_,Zero -> Bot
+      | Zero,_ -> Zero
+      | _ -> Top
+      end
+     
+    let join s1 s2 =
+      if s1 = bottom then s2
+      else if s2 = bottom then s1
+      else if s1 = s2 then s1
+      else top
+    
+    let widen = join
+
+    let meet s1 s2 =
+      if s1 = top then s2
+      else if s2 = top then s1
+      else if s1 = s2 then s1
+      else bottom
+    
+    let narrow = meet
+
+    let compare s1 s2 = function
+    | AbstractSyntax.AST_EQUAL -> let s = meet s1 s2 in  s,s
+    | AbstractSyntax.AST_NOT_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Bot,Bot
+      | Zero,Zero -> Bot,Bot
+      | _ -> s1,s2 end
+    | AbstractSyntax.AST_GREATER -> 
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Bot,Bot
+      | Zero,Zero -> Bot,Bot
+      | Zero,Plus -> Bot,Bot
+      | Zero,Top -> Zero,Minus
+      | Minus,Zero -> Bot,Bot
+      | Minus,Plus -> Bot,Bot
+      | Minus,Top -> Minus,Minus
+      | Top,Zero -> Plus,Zero
+      | Top,Plus -> Plus,Plus
+      | _ -> s1,s2 end
+    | AbstractSyntax.AST_GREATER_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Bot,Bot
+      | Zero,Plus -> Bot,Bot
+      | Minus,Zero -> Bot,Bot
+      | Minus,Plus -> Bot,Bot
+      | Minus,Top -> Minus,Minus
+      | Top,Plus -> Plus,Plus
+      | _ -> s1,s2 end
+    | AbstractSyntax.AST_LESS ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Bot,Bot
+      | Zero,Zero -> Bot,Bot
+      | Zero,Minus -> Bot,Bot
+      | Zero,Top -> Zero,Plus
+      | Plus,Zero -> Bot,Bot
+      | Plus,Plus -> Bot,Bot
+      | Plus,Top -> Plus,Plus
+      | Top,Zero -> Minus,Zero
+      | Top,Minus -> Minus,Minus
+      | _ -> s1,s2 end
+    | AbstractSyntax.AST_LESS_EQUAL ->
+      begin match s1,s2 with
+      | Bot,_ | _,Bot -> Bot,Bot
+      | Zero,Minus -> Bot,Bot
+      | Plus,Zero -> Bot,Bot
+      | Plus,Minus -> Bot,Bot
+      | Plus,Top -> Plus,Plus
+      | Top,Minus -> Minus,Minus
+      | _ -> s1,s2 end
+
+    let bwd_unary x op r =
+      match op with
+      | AbstractSyntax.AST_UNARY_PLUS -> meet x r
+      | AbstractSyntax.AST_UNARY_MINUS -> meet x (unary r AbstractSyntax.AST_UNARY_MINUS)
+
+    let bwd_binary x y op r =
+      match op with
+      | AST_PLUS -> meet (binary r y AST_MINUS) x, meet (binary r x AST_MINUS) y
+      | AST_MINUS -> meet (binary r y AST_PLUS) x, meet (binary x r AST_MINUS) y
+      | AST_MULTIPLY -> meet (binary r y AST_DIVIDE) x, meet (binary r x AST_DIVIDE) y
+      | _ -> x,y
+    
+    let leq s1 s2 = match s1,s2 with
+    | Bot,_ | _,Top -> true
+    | _ -> s1 = s2
+
+    let is_bottom = function
+    | Bot -> false
+    | _ -> false
+
+    let pp fmt = function
+      | Plus -> Format.fprintf fmt "Plus"
+      | Minus -> Format.fprintf fmt "Minus"
+      | Zero -> Format.fprintf fmt "0"
+      | Top -> Format.fprintf fmt "Top"
+      | Bot -> Format.fprintf fmt "Bottom"
+  end: VALUE_DOMAIN)
 
 module IntervalDomain =
   (struct
