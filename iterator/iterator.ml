@@ -52,7 +52,7 @@ let iterate cfg =
           let not_bool_expr = CFG_bool_unary(AST_NOT, bool_expr) in 
           begin
           if not (Domain.is_bottom (Domain.guard env not_bool_expr)) then
-            Printf.printf "File \"%s\", line %d: Assertion failure" pos.pos_fname pos.pos_lnum;
+            Printf.printf "File \"%s\", line %d: Assertion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 failure" pos.pos_fname pos.pos_lnum;
           end;
           Domain.guard env bool_expr
 	      
@@ -76,7 +76,8 @@ let iterate cfg =
           else
            Domain.join env_dst new_env_dst
         in
-        (NMap.add arc.arc_dst new_env_dst program_env, (changed || env_dst <> new_env_dst))
+
+        (NMap.add arc.arc_dst new_env_dst program_env, (changed || not (Domain.leq new_env_dst env_dst)))
       )
       program_env node.node_in
       in
