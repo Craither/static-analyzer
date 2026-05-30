@@ -180,7 +180,7 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
       guard t bool_expr false
 
     let leq e1 e2 =
-      VMap.fold (fun k v acc -> acc && V.leq v (VMap.find k e2)) e1 true
+      VMap.fold (fun k v acc -> acc && VMap.mem k e2 && V.leq v (VMap.find k e2)) e1 true
 
     let is_bottom = VMap.is_empty
 
