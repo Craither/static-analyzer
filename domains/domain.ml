@@ -118,6 +118,9 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
         
         | CFG_compare(compare_op, int_expr1, int_expr2) ->
           let rec refine_values env abs_v int_expr = 
+            (if V.is_bottom abs_v then
+                raise EmptyAbstract);
+            
             match int_expr with 
             | CFG_int_unary(int_unary_op, int_expr) ->
               let value = eval_int_expr env int_expr in
@@ -131,18 +134,13 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
               meet (refine_values env value1 int_expr1) (refine_values env value2 int_expr2)
             
             | CFG_int_var(var) -> 
-              begin
-              if V.is_bottom abs_v then
-                raise EmptyAbstract 
-              else
-                VMap.add var abs_v env
-              end
+              VMap.add var abs_v env
               
             | CFG_int_const(_) -> 
-              bottom
+              env
               
             | CFG_int_rand(_, _) -> 
-              bottom
+              env
           in
           let compare_op = 
             if is_not then 
@@ -180,7 +178,7 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
       Format.fprintf fmt "{id = %d; name = %s}" var.var_id var.var_name
     
     let pp fmt vmap =
-        VMap.iter (fun v s -> Format.fprintf fmt "%a -> %a@\n" print_var v V.pp s) vmap
+      VMap.iter (fun v s -> Format.fprintf fmt "%a -> %a@\n" print_var v V.pp s) vmap
   end
 
 module PolyhedraDomain (V:VARS) : DOMAIN = struct
