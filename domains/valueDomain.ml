@@ -629,7 +629,12 @@ module CongruenceDomain =
           if Z.equal a2 Z.zero && Z.equal b2 Z.zero then bottom
           else if Z.equal a2 Z.zero && Z.divisible a1 b2 && Z.divisible b1 b2 then Congr (Z.div a1 b2,Z.div b1 b2)
           else top
-        | AbstractSyntax.AST_MODULO -> top
+        | AbstractSyntax.AST_MODULO -> 
+          if Z.equal a1 Z.zero && Z.equal a2 Z.zero then (
+            if Z.equal Z.zero b2 then Bottom
+            else Congr (Z.zero,Z.(mod) a1 a2)
+          ) else
+            top
         end
 
     let compare x y op = 
