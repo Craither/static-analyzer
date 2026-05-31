@@ -161,8 +161,6 @@ module SignDomain =
       if s1 = bottom then s2
       else if s2 = bottom then s1
       else if s1 = s2 then s1
-      else if s1 == Zero then s2
-      else if s2 == Zero then s1
       else top
     
     let widen = join

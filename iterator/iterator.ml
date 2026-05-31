@@ -7,17 +7,38 @@
 open Frontend
 open ControlFlowGraph
 open Domains
+open Lexing
 
 module MyVars : Domain.VARS = struct
   let support = []
 end
 
-module Domain = Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars)
-
-(*module Domain = Domain.PolyhedraDomain(MyVars)*)
-
 module NSet = NodeSet
 module NMap = NodeMap
+
+let domains : (module Domain.DOMAIN) list =
+  [
+    (module Domain.Value_to_Domain(ValueDomain.IntervalDomain)(MyVars) : Domain.DOMAIN);
+    (module Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars) : Domain.DOMAIN);
+    (module Domain.Value_to_Domain(ValueDomain.SignDomain)(MyVars) : Domain.DOMAIN)
+  ]
+
+module PosSet = struct
+  type t = (Lexing.position, unit) Hashtbl.t
+  let create n = Hashtbl.create n
+  let add s x = Hashtbl.replace s x ()
+  let remove s x = Hashtbl.remove s x
+  let iter f s =  Hashtbl.iter (fun pos () -> f pos) s
+  let mem s x = Hashtbl.mem s x
+  let inter a b =
+    let r = Hashtbl.create (min (Hashtbl.length a) (Hashtbl.length b)) in
+    Hashtbl.iter
+      (fun k v ->
+         if Hashtbl.mem b k then
+           Hashtbl.add r k v)
+      a;
+    r
+end
 
 let rec traverse n =
   match n.mark with
@@ -32,8 +53,9 @@ let rec traverse n =
 let detect_cycles cfg =
   List.iter traverse cfg.cfg_nodes
 
-let iterate cfg =
+let error_domain cfg (module Domain : Domain.DOMAIN) =
   detect_cycles cfg;
+  let failed_assert = PosSet.create 64 in
   let rec update to_update program_env = 
     match NSet.min_elt_opt to_update with
     | None -> program_env (*we've found a fix point*)
@@ -54,7 +76,7 @@ let iterate cfg =
           let not_bool_expr = CFG_bool_unary(AST_NOT, bool_expr) in 
           begin
           if not (Domain.is_bottom (Domain.guard env not_bool_expr)) then
-            Printf.printf "File \"%s\", line %d: Assertion failure" pos.pos_fname pos.pos_lnum;
+            PosSet.add failed_assert pos;
           end;
           Domain.guard env bool_expr
 	      
@@ -72,13 +94,15 @@ let iterate cfg =
           | Some env_dst -> env_dst
         in
         let new_env_dst = update_env env_src arc.arc_inst in
+        let new_env_dst = Domain.join env_dst new_env_dst in
         let new_env_dst = 
           if node.widen then 
            Domain.widen env_dst new_env_dst
           else
-           Domain.join env_dst new_env_dst
+           new_env_dst
         in
-        (NMap.add arc.arc_dst new_env_dst program_env, (changed || not (Domain.leq env_dst new_env_dst)))
+
+        (NMap.add arc.arc_dst new_env_dst program_env, (changed || not (Domain.leq new_env_dst env_dst)))
       )
       program_env node.node_in
       in
@@ -117,12 +141,27 @@ let iterate cfg =
     fst (update to_update (program_env, false))
   in
   let initial_state = start_exec cfg.cfg_init_entry Domain.init NMap.empty in (*we initialize all the variables*)
-  let default_state = start_exec cfg.cfg_init_entry Domain.bottom NMap.empty in (*we initialize all the variables*)
-  let default_value = NMap.find cfg.cfg_init_exit default_state in
-  List.fold_left ( (*we test each function*)
+  let default_value = NMap.find cfg.cfg_init_exit initial_state in
+  let _ = List.fold_left ( (*we test each function*)
   fun program_env f -> 
     start_exec f.func_entry default_value program_env) 
-  initial_state cfg.cfg_funcs;
-  (*
-  let iter_node node : unit = Format.printf "<%i>: ⊤@ " node.node_id in List.iter iter_node cfg.cfg_nodes*)
+  initial_state cfg.cfg_funcs
+  in
+  failed_assert
+  
+
+let iterate cfg = 
+  let all_asserts = PosSet.create 64 in
+  List.iter (
+  fun arc -> 
+    match arc.arc_inst with 
+    | CFG_assert(_, (pos, _)) -> PosSet.add all_asserts pos
+    | _ -> ()
+  ) cfg.cfg_arcs;
+  let failed_assert = List.fold_left (
+  fun assert_list domain -> 
+    PosSet.inter (error_domain cfg domain) assert_list
+  ) all_asserts domains in
+  
+  PosSet.iter (fun pos -> Printf.printf "File \"%s\", line %d: Assertion failure" pos.pos_fname pos.pos_lnum) failed_assert;
 
