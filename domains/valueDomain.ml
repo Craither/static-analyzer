@@ -639,6 +639,24 @@ module CongruenceDomain =
         begin match op with
         | AbstractSyntax.AST_EQUAL -> 
           let x' = meet x y in x',x'
+        | AbstractSyntax.AST_NOT_EQUAL ->
+          let x' =
+            if Z.equal a2 Z.zero then
+              if Z.equal a1 Z.zero then
+                if not (Z.equal b1 b2) then
+                  x
+                else Bottom
+              else x
+            else x 
+          in let y' =
+            if Z.equal a1 Z.zero then
+              if Z.equal a2 Z.zero then
+                if not (Z.equal b1 b2) then
+                  y
+                else Bottom
+              else y
+            else y in
+            x',y'
         | _ ->
           let (f1,f2) = 
             begin match op with
@@ -646,8 +664,6 @@ module CongruenceDomain =
             | AbstractSyntax.AST_GREATER -> Z.gt, Z.lt
             | AbstractSyntax.AST_LESS_EQUAL -> Z.leq, Z.geq
             | AbstractSyntax.AST_LESS -> Z.lt, Z.gt
-            | AbstractSyntax.AST_NOT_EQUAL -> 
-              let not_equal a b = not (Z.equal a b) in not_equal, not_equal
             | _ -> failwith "Cas impossible"
             end
           in
@@ -657,7 +673,7 @@ module CongruenceDomain =
                 if f1 b1 b2 then
                   x
                 else Bottom
-              else Bottom
+              else x
             else x 
           in let y' =
             if Z.equal a1 Z.zero then
@@ -665,7 +681,7 @@ module CongruenceDomain =
                 if f2 b1 b2 then
                   y
                 else Bottom
-              else Bottom
+              else y
             else y in
             x',y'
         end
