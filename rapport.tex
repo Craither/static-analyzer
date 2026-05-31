@@ -1,0 +1,41 @@
+\documentclass{article}
+\usepackage[a4paper,margin=2cm]{geometry}
+\usepackage{graphicx} % Required for inserting images
+\usepackage{amsfonts}
+
+\title{Rapport OS}
+\author{Alixe Dethorey}
+\date{May 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{From a value domain to a domain:}
+A functor that takes in argument a list of vars and a VALUE\_DOMAIN has been implemented.\\
+The set of environments is abstracted by a map from variables to abstract values from the value domain. Most operations are quite intuitive, as they consist of applying the value domain operations point wise, such as join that joins the values of each variables. \\
+The only complex part was the guard which was implemented following the HC4 algorithm.
+
+\section{Sign Domain:}
+The sign domain has been implemented as a VALUE\_DOMAIN that is then converted.\\
+Here the sign domain is the one presented in class, with $\gamma(Zero)=\{0\}$, $\gamma(+) = [1;+\infty[$ and $\gamma(-) = ]-\infty;-1]$.\\
+Most operations were easy to implement as the domain isn't really complex. Moreover, as the domain is finite, there is no need to use widening.
+
+\section{Interval Domain:}
+We represent intervals either as Empty or as a couple of values that are either integers or infinities. The domain keeps the invariant that if Interval(a,b) is returned, $a>b$, otherwise it would have returned Empty. Hence, the domain has unique representation.\\
+For the multiplication, we take the min and the max of all crossed products.\\
+For the division, a function computes the maximum and the minimum value that can be achieved with two different borders, this is non trivial because of the infinities borders. The function is used on all the crossed products.\\
+For the modulo, we observe that $(-a)$ mod $b$ = $-(a$ mod $b)$. Hence we split the interval into its negative and positive side, and then we compute a modulo on a positive interval. We then join both.\\
+Because joining $a\mathbb{Z} + b$ and $c\mathbb{Z} + d$ strictly decreases $a$, there is no need for widening.
+
+\section{Congruence Domain:}
+This was the hardest value domain to implement because of all the arithmetic trickery that goes on.\\
+For example, the meet operation required the implementation of the extended euclidean algorithm as well as the computation of $b''$ that wasn't given by the paper.\\
+Because of the complexity of the domain, most operations aren't optimally implemented such as the division.\\
+For the comparisons, the values are refined only if they are both constant. The backward operations are implemented as in the other domains, with division by 0 leading to top.
+
+\section{Polyhedra Domain:}
+The library APRON was used to implement the domain. However, we couldn't make it work and debugging it was difficult with the lack of exhaustive documentation. \\
+The code is still there to read in the files.\\
+Most functions were implemented by directly calling the functions from the library. Only the guard had to get some work into it as the library doesn't seem to have a way to manipulate boolean operators, to do so, we join on "or" and meet on "and".
+\end{document}
