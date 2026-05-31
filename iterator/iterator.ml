@@ -12,7 +12,7 @@ module MyVars : Domain.VARS = struct
   let support = []
 end
 
-module Domain = Domain.Value_to_Domain(ValueDomain.SignDomain)(MyVars)
+module Domain = Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars)
 
 (*module Domain = Domain.PolyhedraDomain(MyVars)*)
 

@@ -632,7 +632,7 @@ module CongruenceDomain =
         | AbstractSyntax.AST_MODULO -> 
           if Z.equal a1 Z.zero && Z.equal a2 Z.zero then (
             if Z.equal Z.zero b2 then Bottom
-            else Congr (Z.zero,Z.(mod) a1 a2)
+            else Congr (Z.zero,Z.(mod) b1 b2)
           ) else
             top
         end
