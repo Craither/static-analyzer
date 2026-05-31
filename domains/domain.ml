@@ -82,13 +82,6 @@ module Value_to_Domain (V : ValueDomain.VALUE_DOMAIN) (Vars : VARS): DOMAIN =
     let assign env v exp =
       VMap.add v (eval_int_expr env exp) env
 
-    type evaluated_tree =
-    | ETVar of var
-    | ETConst of Z.t
-    | ETRand of Z.t * Z.t
-    | ETBinop of AbstractSyntax.int_binary_op * (evaluated_tree * V.t) * (evaluated_tree * V.t)
-    | ETUnop of AbstractSyntax.int_unary_op * (evaluated_tree * V.t)
-
     let pointwise_op f e1 e2 =
       VMap.union (fun _ v1 v2 -> Some (f v1 v2)) e1 e2
 

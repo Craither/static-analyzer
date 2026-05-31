@@ -234,7 +234,9 @@ module SignDomain =
       match op with
       | AST_PLUS -> meet (binary r y AST_MINUS) x, meet (binary r x AST_MINUS) y
       | AST_MINUS -> meet (binary r y AST_PLUS) x, meet (binary x r AST_MINUS) y
-      | AST_MULTIPLY -> meet (binary r y AST_DIVIDE) x, meet (binary r x AST_DIVIDE) y
+      | AST_MULTIPLY -> 
+        (if y = Zero then x else meet (binary r y AST_DIVIDE) x), 
+        (if x = Zero then y else meet (binary r x AST_DIVIDE) y)
       | _ -> x,y
     
     let leq s1 s2 = match s1,s2 with
@@ -516,11 +518,11 @@ module IntervalDomain =
         begin match y with
         | Empty -> Empty
         | Interval (a',b') -> if is_negative a' && is_positive b' then x
-        else interval_intersect x (interval_div r y) end,
+          else interval_intersect x (interval_div r y) end,
         begin match x with
         | Empty -> Empty
         | Interval (a',b') -> if is_negative a' && is_positive b' then y
-        else interval_intersect y (interval_div r x) end
+          else interval_intersect y (interval_div r x) end
       | AbstractSyntax.AST_DIVIDE -> x,y
       | AbstractSyntax.AST_MODULO -> x,y
     let join = abstract_union
