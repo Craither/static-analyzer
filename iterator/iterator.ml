@@ -17,6 +17,16 @@ module Domain = Domain.Value_to_Domain(ValueDomain.CongruenceDomain)(MyVars)
 module NSet = NodeSet
 module NMap = NodeMap
 
+module PosSet = struct
+  type t = (Lexing.position, unit) Hashtbl.t
+  let create n = Hashtbl.create n
+  let add s x = Hashtbl.replace s x ()
+  let remove s x = Hashtbl.remove s x
+  let iter f s =
+    Hashtbl.iter (fun pos () -> f pos) s
+  let mem s x = Hashtbl.mem s x
+end
+
 let rec traverse n =
   match n.mark with
   | Visited -> ()
@@ -32,6 +42,7 @@ let detect_cycles cfg =
 
 let iterate cfg =
   detect_cycles cfg;
+  let failed_assert = PosSet.create 64 in
   let rec update to_update program_env = 
     match NSet.min_elt_opt to_update with
     | None -> program_env (*we've found a fix point*)
@@ -52,7 +63,7 @@ let iterate cfg =
           let not_bool_expr = CFG_bool_unary(AST_NOT, bool_expr) in 
           begin
           if not (Domain.is_bottom (Domain.guard env not_bool_expr)) then
-            Printf.printf "File \"%s\", line %d: Assertion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 failure" pos.pos_fname pos.pos_lnum;
+            PosSet.add failed_assert pos;
           end;
           Domain.guard env bool_expr
 	      
@@ -117,10 +128,11 @@ let iterate cfg =
   in
   let initial_state = start_exec cfg.cfg_init_entry Domain.bottom NMap.empty in (*we initialize all the variables*)
   let default_value = NMap.find cfg.cfg_init_exit initial_state in
-  List.fold_left ( (*we test each function*)
+  let _ = List.fold_left ( (*we test each function*)
   fun program_env f -> 
     start_exec f.func_entry default_value program_env) 
-  initial_state cfg.cfg_funcs;
-  (*
-  let iter_node node : unit = Format.printf "<%i>: ⊤@ " node.node_id in List.iter iter_node cfg.cfg_nodes*)
+  initial_state cfg.cfg_funcs
+  in
+  PosSet.iter (fun pos -> Printf.printf "File \"%s\", line %d: Assertion failure" pos.pos_fname pos.pos_lnum)
+  ()
 
