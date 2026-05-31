@@ -216,7 +216,7 @@ module PolyhedraDomain (V:VARS) : DOMAIN = struct
     Texpr1.Cst (Coeff.i_of_int (Z.to_int a) (Z.to_int b))
     
   type t = man Abstract1.t
-
+  
   let assign poly v e =
     Abstract1.assign_texpr manager poly (Var.of_string v.var_name) (Texpr1.of_expr env (expr_to_texpr e)) None
 

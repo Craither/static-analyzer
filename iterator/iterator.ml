@@ -78,7 +78,7 @@ let iterate cfg =
           else
            Domain.join env_dst new_env_dst
         in
-        (NMap.add arc.arc_dst new_env_dst program_env, (changed || env_dst <> new_env_dst))
+        (NMap.add arc.arc_dst new_env_dst program_env, (changed || not (Domain.leq env_dst new_env_dst)))
       )
       program_env node.node_in
       in
@@ -116,8 +116,9 @@ let iterate cfg =
     (*let program_env = NMap.add node default_value program_env in*)
     fst (update to_update (program_env, false))
   in
-  let initial_state = start_exec cfg.cfg_init_entry Domain.bottom NMap.empty in (*we initialize all the variables*)
-  let default_value = NMap.find cfg.cfg_init_exit initial_state in
+  let initial_state = start_exec cfg.cfg_init_entry Domain.init NMap.empty in (*we initialize all the variables*)
+  let default_state = start_exec cfg.cfg_init_entry Domain.bottom NMap.empty in (*we initialize all the variables*)
+  let default_value = NMap.find cfg.cfg_init_exit default_state in
   List.fold_left ( (*we test each function*)
   fun program_env f -> 
     start_exec f.func_entry default_value program_env) 
